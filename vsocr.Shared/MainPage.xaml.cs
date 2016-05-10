@@ -14,6 +14,9 @@ using Windows.UI.Xaml.Media;
 using Windows.UI.Xaml.Navigation;
 using Windows.UI.Xaml.Media.Imaging;
 using WindowsPreview.Media.Ocr;
+using System.Threading.Tasks;
+using Windows.Storage.Pickers;
+using Windows.Storage;
 
 // The Blank Page item template is documented at http://go.microsoft.com/fwlink/?LinkId=234238
 
@@ -29,6 +32,8 @@ namespace vsocr
             this.InitializeComponent();
 
             this.NavigationCacheMode = NavigationCacheMode.Required;
+
+            btnRecognize.IsEnabled = false;
         }
 
         /// <summary>
@@ -49,44 +54,73 @@ namespace vsocr
 
         private readonly OcrEngine _engine = new OcrEngine(OcrLanguage.English);
 
-        private async void ExtractText(object sender, RoutedEventArgs e)
+        private async void btnLoad_Click(object sender, RoutedEventArgs e)
         {
-            //todo: folder
-            var folder = Windows.ApplicationModel.Package.Current.InstalledLocation;
-            var imageFiles = await folder.GetFilesAsync();
-            var imageFile = imageFiles
-                .FirstOrDefault(x => x.Name.EndsWith(".jpg"));
+            await LoadImageAsync();
+        }
 
-            if (imageFile == null)
+        private async Task LoadImageAsync()
+        {
+            var picker = new FileOpenPicker
             {
-                recognizedTextTxtBk.Text = "Error. No image file found";
-                return;
+                SuggestedStartLocation = PickerLocationId.PicturesLibrary,
+                FileTypeFilter = { ".jpg", ".jpeg", ".png" }
+            };
+
+            var file = await picker.PickSingleFileAsync();
+            if (file != null)
+                await LoadImageAsync(file);
+        }
+
+        private async Task LoadImageAsync(StorageFile file)
+        {
+            var imageProperties = await file.Properties.GetImagePropertiesAsync();
+
+            using (var imageStream = await file.OpenAsync(FileAccessMode.Read))
+            {
+                var bitmap = new WriteableBitmap((int)imageProperties.Width, (int)imageProperties.Height);
+                bitmap.SetSource(imageStream);
+                previewImage.Source = bitmap;
             }
 
-            var imageProperties = await imageFile.Properties.GetImagePropertiesAsync();
+            ClearResults();
+        }
 
-            using (var imgStream = await imageFile.OpenAsync(Windows.Storage.FileAccessMode.Read))
-            {
-                var bitmap = new WriteableBitmap((int)imageProperties.Height, (int)imageProperties.Width);
-                bitmap.SetSource(imgStream);
+        private void ClearResults()
+        {
+            // Retrieve initial state.
+            previewImage.RenderTransform = null;
+
+            btnRecognize.IsEnabled = true;
+
+            recognizedTextTxtBlock.Text = "";
+        }
+
+        private async void btnExtract_Click(object sender, RoutedEventArgs e)
+        {
+            await RecognizeText();
+        }
+
+        private async Task RecognizeText()
+        {
+            var bitmap = (WriteableBitmap)previewImage.Source;
 
                 var result = await _engine.RecognizeAsync((uint)bitmap.PixelHeight, (uint)bitmap.PixelWidth,
                     bitmap.PixelBuffer.ToArray());
 
-                if (result.Lines != null)
+            if (result.Lines != null)
+            {
+                var recognizedText = "";
+                foreach (var line in result.Lines)
                 {
-                    var recognizedText = "";
-                    foreach (var line in result.Lines)
+                    foreach (var word in line.Words)
                     {
-                        foreach (var word in line.Words)
-                        {
-                            recognizedText += word.Text + " ";
-                        }
-                        recognizedText += Environment.NewLine;
+                        recognizedText += word.Text + " ";
                     }
-
-                    recognizedTextTxtBk.Text = recognizedText;
+                    recognizedText += Environment.NewLine;
                 }
+
+                recognizedTextTxtBlock.Text = recognizedText;
             }
         }
     }
